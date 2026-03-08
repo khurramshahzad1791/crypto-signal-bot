@@ -6,4 +6,6 @@ WORKDIR /freqtrade
 
 EXPOSE 8080
 
-CMD ["freqtrade", "trade", "--config", "config.json"]
+# Override the default entrypoint and directly run the freqtrade binary
+ENTRYPOINT []
+CMD ["/usr/local/bin/freqtrade", "trade", "--config", "config.json"]
