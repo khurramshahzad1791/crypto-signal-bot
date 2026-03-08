@@ -1,6 +1,7 @@
 {
     "max_open_trades": 3,
     "stake_currency": "USDT",
+    "db_url": "sqlite:////freqtrade/tradesv3.sqlite",
     "stake_amount": "unlimited",
     "tradable_balance_ratio": 0.99,
     "timeframe": "5m",
