@@ -1,12 +1,15 @@
 {
     "max_open_trades": 3,
     "stake_currency": "USDT",
-    "db_url": "sqlite:////freqtrade/tradesv3.sqlite",
     "stake_amount": "unlimited",
     "tradable_balance_ratio": 0.99,
     "timeframe": "5m",
     "dry_run": true,
     "cancel_open_orders_on_exit": false,
+    "unfilledtimeout": {
+        "entry": 10,
+        "exit": 30
+    },
     "exchange": {
         "name": "mexc",
         "key": "",
@@ -17,6 +20,21 @@
         "ccxt_async_config": {
             "enableRateLimit": true
         }
+    },
+    "entry_pricing": {
+        "price_side": "same",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0,
+        "check_depth_of_market": {
+            "enabled": false,
+            "bids_to_ask_delta": 1
+        }
+    },
+    "exit_pricing": {
+        "price_side": "same",
+        "use_order_book": true,
+        "order_book_top": 1
     },
     "pair_whitelist": [
         "BTC/USDT",
@@ -64,5 +82,6 @@
         "enabled": false,
         "token": "dummy",
         "chat_id": "dummy"
-    }
+    },
+    "db_url": "sqlite:////freqtrade/tradesv3.sqlite"
 }
