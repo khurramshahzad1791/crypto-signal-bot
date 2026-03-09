@@ -112,7 +112,7 @@ with tab4:
         learner = StrategyLearner()
         with st.spinner("Training... (may take a few minutes)"):
             learner.train()
-        st.success("Training complete!")
+        st.success("Training complete (placeholder).")
 
 # Auto refresh
 if auto_refresh:
