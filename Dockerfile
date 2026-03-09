@@ -1,12 +1,12 @@
-FROM freqtradeorg/freqtrade:latest
+FROM python:3.10-slim
 
-# Copy your custom strategy and config
-COPY config.json /freqtrade/config.json
-COPY strategies/ /freqtrade/user_data/strategies/
+WORKDIR /app
 
-WORKDIR /freqtrade
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-EXPOSE 8080
+COPY . .
 
-ENTRYPOINT ["freqtrade"]
-CMD ["trade", "--config", "config.json", "--strategy", "SimpleStrategy"]
+EXPOSE 8501
+
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
