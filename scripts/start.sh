@@ -1,19 +1,8 @@
 #!/bin/bash
-# Start script for Railway deployment
+# Start both FastAPI (background) and Streamlit (foreground)
 
-echo "Starting Integrated Trading System..."
+# Run FastAPI in background
+uvicorn orchestrator:app --host 0.0.0.0 --port 8000 &
 
-# Create necessary directories
-mkdir -p /app/data /app/logs /app/models
-
-# Start the main orchestrator (API + background tasks)
-python orchestrator.py &
-
-# Start Streamlit dashboard in background
-streamlit run orchestrator.py dashboard --server.port=8501 --server.address=0.0.0.0 &
-
-# Wait for any process to exit
-wait -n
-
-# Exit with status of process that exited first
-exit $?
+# Run Streamlit in foreground (so Railway knows it's alive)
+streamlit run orchestrator.py --server.port=8501 --server.address=0.0.0.0
