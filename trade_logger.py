@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Float, DateTime, Integer, Boolean
+from sqlalchemy import create_engine, Column, String, Float, DateTime, Integer
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -16,7 +16,7 @@ class Trade(Base):
     exit_price = Column(Float, nullable=True)
     stop_loss = Column(Float)
     take_profit = Column(Float)
-    outcome = Column(String, nullable=True)  # 'win', 'loss', 'open'
+    outcome = Column(String, nullable=True)
     pnl_percent = Column(Float, nullable=True)
     confidence = Column(Integer)
 
@@ -29,7 +29,6 @@ class SignalLog(Base):
     price = Column(Float)
     confidence = Column(Integer)
 
-# Ensure data directory exists
 os.makedirs("/app/data", exist_ok=True)
 engine = create_engine('sqlite:////app/data/trades.db', echo=False)
 Base.metadata.create_all(engine)
