@@ -1,6 +1,5 @@
 FROM python:3.9-buster
 
-# Install system dependencies needed for numpy, pandas, lightgbm
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libgomp1 \
