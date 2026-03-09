@@ -1,7 +1,5 @@
-# app.py
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
 from datetime import datetime
 import time
 from scanner import CryptoScanner
@@ -50,13 +48,11 @@ with tab1:
 
     if st.session_state.signals:
         df_signals = pd.DataFrame(st.session_state.signals)
-        st.dataframe(df_signals, use_container_width=True)
+        st.dataframe(df_signals, width='stretch')
 
-        # Optional: take trade (simulated)
         if st.checkbox("Show take trade buttons (simulated)"):
             for idx, row in df_signals.iterrows():
                 if st.button(f"Take {row['pair']} {row['direction']}", key=f"take_{idx}"):
-                    # Log trade
                     session = Session()
                     trade = Trade(
                         pair=row['pair'],
@@ -88,9 +84,8 @@ with tab2:
             'pnl%': t.pnl_percent,
             'outcome': t.outcome
         } for t in trades])
-        st.dataframe(df_trades, use_container_width=True)
+        st.dataframe(df_trades, width='stretch')
 
-        # Simple stats
         wins = df_trades[df_trades['outcome'] == 'win']
         losses = df_trades[df_trades['outcome'] == 'loss']
         win_rate = len(wins) / (len(wins) + len(losses)) * 100 if len(wins)+len(losses) > 0 else 0
@@ -104,7 +99,6 @@ with tab3:
     user_input = st.text_input("You:", key="chat_input")
     if st.button("Send"):
         if user_input:
-            # Build context
             recent_signals = st.session_state.signals[-3:] if st.session_state.signals else []
             recent_trades = trades[:5] if trades else []
             response = st.session_state.chat.get_response(user_input, recent_signals, recent_trades)
