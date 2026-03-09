@@ -3,42 +3,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Trading Configuration
-TRADING_PAIRS = [
-    "BTC/USDT",
-    "ETH/USDT", 
-    "XRP/USDT",
-    "SOL/USDT"
-]
+# Trading pairs
+PAIRS = ["BTC/USDT", "ETH/USDT", "XRP/USDT", "SOL/USDT"]
 
-TIMEFRAMES = {
-    "entry": "5m",
-    "trend": "1h",
-    "analysis": "4h"
-}
+# Timeframes
+ENTRY_TIMEFRAME = "5m"
+TREND_TIMEFRAME = "1h"
 
-# Risk Management
+# Risk management
 MAX_POSITIONS = 3
-MAX_LEVERAGE = 100
-RISK_PER_TRADE = 0.02  # 2% of account
-MIN_CONFIDENCE_SCORE = 70
+RISK_PER_TRADE = 0.02  # 2%
 
-# API Keys (set in Railway Variables)
+# API keys (set in Railway Variables)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-ALPHA_VANTAGE_KEY = os.getenv("ALPHA_VANTAGE_KEY")
-JINA_API_KEY = os.getenv("JINA_API_KEY")
 
-# Multi-Agent Configuration
-AGENTS = {
-    "market_analyst": True,
-    "news_sentiment": True,
-    "technical_strategist": True,
-    "risk_manager": True,
-    "execution_optimizer": True
-}
-
-# Model Storage
-MODEL_PATH = "/app/models/"
+# Paths
 DATA_PATH = "/app/data/"
-LOG_PATH = "/app/logs/"
+MODEL_PATH = "/app/models/"
