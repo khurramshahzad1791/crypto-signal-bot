@@ -1,48 +1,37 @@
+import streamlit as st
 import asyncio
 import logging
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI
 import uvicorn
-import streamlit as st
-from typing import Dict, Any
-import json
+import threading
+import time
 from datetime import datetime
+import pandas as pd
 
-# Import agent modules
+# Import agents
 from agents.market_analyst import MarketAnalyst
 from agents.news_sentiment import NewsSentimentAgent
 from agents.technical_strategist import TechnicalStrategist
 from agents.risk_manager import RiskManager
 from agents.execution_optimizer import ExecutionOptimizer
 
-# Import tools
-from tools.data_feeds import DataFeedManager
-from tools.learning_engine import LearningEngine
-from tools.telegram_bot import TelegramBot
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Integrated Crypto Trading System")
+# ---------- FastAPI app (for health checks and API) ----------
+app = FastAPI(title="Multi-Agent Trading System")
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@app.get("/")
+async def root():
+    return {"status": "online", "service": "Trading System"}
 
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+# ---------- Trading Orchestrator ----------
 class TradingOrchestrator:
-    """Orchestrates all AI agents and tools"""
-    
     def __init__(self):
-        self.data_manager = DataFeedManager()
-        self.learning_engine = LearningEngine()
-        self.telegram_bot = TelegramBot()
-        
-        # Initialize all agents
         self.agents = {
             'market_analyst': MarketAnalyst(),
             'news_sentiment': NewsSentimentAgent(),
@@ -50,158 +39,90 @@ class TradingOrchestrator:
             'risk_manager': RiskManager(),
             'execution_optimizer': ExecutionOptimizer()
         }
-        
-        self.active_signals = []
-        self.performance_metrics = {}
-        
-    async def analyze_markets(self):
-        """Run complete market analysis through all agents"""
+        self.signals = []
+        self.running = True
+
+    async def run_cycle(self):
+        """One analysis cycle"""
         try:
-            # Collect data from all sources
-            market_data = await self.data_manager.fetch_all_pairs()
-            
-            # Run each agent analysis
-            agent_results = {}
-            for name, agent in self.agents.items():
-                result = await agent.analyze(market_data)
-                agent_results[name] = result
-                
-            # Combine and validate signals
-            validated_signals = await self._validate_signals(agent_results)
-            
-            # Learn from outcomes
-            await self.learning_engine.update(validated_signals)
-            
-            return validated_signals
-            
-        except Exception as e:
-            logger.error(f"Analysis error: {e}")
-            return []
-    
-    async def _validate_signals(self, agent_results):
-        """Cross-validate signals from multiple agents"""
-        combined = []
-        
-        # Market Analyst + Technical Strategist must agree
-        if agent_results.get('market_analyst') and agent_results.get('technical_strategist'):
-            ma_signal = agent_results['market_analyst']['signal']
-            ts_signal = agent_results['technical_strategist']['signal']
-            
-            if ma_signal['direction'] == ts_signal['direction']:
-                # Calculate confidence score
-                confidence = (ma_signal['confidence'] + ts_signal['confidence']) / 2
-                
-                # Risk check
-                risk_approved = await self.agents['risk_manager'].check(
-                    ma_signal, 
-                    confidence
-                )
-                
-                if risk_approved and confidence >= 70:
-                    signal = {
-                        'timestamp': datetime.now(),
-                        'pair': ma_signal['pair'],
-                        'direction': ma_signal['direction'],
-                        'entry': ma_signal['price'],
-                        'stop_loss': ma_signal['stop_loss'],
-                        'take_profit': ma_signal['take_profit'],
-                        'confidence': confidence,
-                        'strategy': 'multi_agent_consensus',
-                        'reasoning': {
-                            'market': ma_signal['reason'],
-                            'technical': ts_signal['reason'],
-                            'news': agent_results.get('news_sentiment', {}).get('summary', '')
+            # Market analyst signal
+            ma_signal = await self.agents['market_analyst'].analyze()
+            # Technical strategist signal
+            ts_signal = await self.agents['technical_strategist'].analyze()
+            # News sentiment
+            news = await self.agents['news_sentiment'].analyze()
+
+            # Combine signals
+            if ma_signal and ts_signal and ma_signal['pair'] == ts_signal['pair']:
+                if ma_signal['direction'] == ts_signal['direction']:
+                    confidence = (ma_signal['confidence'] + ts_signal['confidence']) / 2
+                    # Risk check
+                    risk_ok = await self.agents['risk_manager'].check(ma_signal, confidence)
+                    if risk_ok and confidence >= 70:
+                        signal = {
+                            'timestamp': datetime.now(),
+                            'pair': ma_signal['pair'],
+                            'direction': ma_signal['direction'],
+                            'entry': ma_signal['price'],
+                            'stop_loss': ma_signal['stop_loss'],
+                            'take_profit': ma_signal['take_profit'],
+                            'confidence': confidence,
+                            'news_sentiment': news['sentiment']
                         }
-                    }
-                    combined.append(signal)
-                    
-                    # Send to Telegram
-                    await self.telegram_bot.send_signal(signal)
-        
-        return combined
-    
-    async def run_live(self):
-        """Main live trading loop"""
-        while True:
-            try:
-                signals = await self.analyze_markets()
-                if signals:
-                    self.active_signals = signals
-                    
-                # Sleep for configured interval
-                await asyncio.sleep(300)  # 5 minutes
-                
-            except Exception as e:
-                logger.error(f"Live run error: {e}")
-                await asyncio.sleep(60)
+                        self.signals.append(signal)
+                        logger.info(f"Signal generated: {signal}")
+        except Exception as e:
+            logger.error(f"Cycle error: {e}")
 
-# FastAPI endpoints
-@app.get("/")
-async def root():
-    return {"status": "online", "service": "Integrated Crypto Trading System"}
+    async def run_forever(self):
+        while self.running:
+            await self.run_cycle()
+            await asyncio.sleep(300)  # 5 minutes
 
-@app.get("/health")
-async def health():
-    return {"status": "healthy", "timestamp": datetime.now()}
-
-@app.get("/signals")
-async def get_signals():
-    return {"signals": orchestrator.active_signals}
-
-@app.get("/metrics")
-async def get_metrics():
-    return {"metrics": orchestrator.performance_metrics}
-
-@app.post("/train")
-async def train_models():
-    """Trigger ML model training"""
-    result = await orchestrator.learning_engine.train_models()
-    return {"training": result}
-
-# Streamlit dashboard
-def run_dashboard():
-    st.set_page_config(
-        page_title="AI Trading System Dashboard",
-        page_icon="📈",
-        layout="wide"
-    )
-    
-    st.title("🤖 Multi-Agent AI Trading System")
-    
-    # Dashboard layout
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Active Agents", len(orchestrator.agents))
-    with col2:
-        st.metric("Active Signals", len(orchestrator.active_signals))
-    with col3:
-        st.metric("Model Accuracy", "87%")
-    with col4:
-        st.metric("Win Rate", "72%")
-    
-    # Signals table
-    if orchestrator.active_signals:
-        st.subheader("📊 Current Signals")
-        import pandas as pd
-        df = pd.DataFrame(orchestrator.active_signals)
-        st.dataframe(df, use_container_width=True)
-    
-    # Agent performance
-    st.subheader("🤔 Agent Consensus Analysis")
-    # Add visualization here
-
-# Initialize orchestrator
 orchestrator = TradingOrchestrator()
 
-# Start background tasks
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(orchestrator.run_live())
+# ---------- Background thread for async loop ----------
+def start_background_loop():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(orchestrator.run_forever())
+
+threading.Thread(target=start_background_loop, daemon=True).start()
+
+# ---------- Streamlit UI ----------
+def main():
+    st.set_page_config(page_title="AI Trading System", layout="wide")
+    st.title("🤖 Multi‑Agent AI Trading System")
+
+    # Sidebar
+    with st.sidebar:
+        st.header("Status")
+        st.write(f"Agents active: {len(orchestrator.agents)}")
+        st.write(f"Signals generated: {len(orchestrator.signals)}")
+
+    # Tabs
+    tab1, tab2, tab3 = st.tabs(["📡 Signals", "📊 Performance", "💬 Chat"])
+
+    with tab1:
+        st.subheader("Live Signals")
+        if orchestrator.signals:
+            df = pd.DataFrame(orchestrator.signals[-20:])
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.info("No signals yet. Waiting for market analysis...")
+
+    with tab2:
+        st.subheader("Performance (coming soon)")
+        st.write("Trade history and win rate will appear here.")
+
+    with tab3:
+        st.subheader("AI Chat Assistant")
+        st.write("Chat with your trading assistant (requires API key).")
+        user_input = st.text_input("You:")
+        if user_input:
+            # Placeholder for LLM response
+            st.text_area("Assistant:", "AI response placeholder – configure API key to enable.")
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "dashboard":
-        run_dashboard()
-    else:
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+    # If script is run directly, start Streamlit
+    main()
