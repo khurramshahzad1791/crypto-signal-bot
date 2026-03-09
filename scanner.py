@@ -1,7 +1,10 @@
+# scanner.py
 import ccxt
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from trade_logger import Session, SignalLog
+import config
 
 class CryptoScanner:
     def __init__(self):
@@ -10,8 +13,7 @@ class CryptoScanner:
             'options': {'defaultType': 'spot'}
         })
 
-    def fetch_data(self, symbol, timeframe='5m', limit=200):
-        """Fetch OHLCV data"""
+    def fetch_data(self, symbol, timeframe=config.ENTRY_TIMEFRAME, limit=300):
         try:
             ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -21,50 +23,193 @@ class CryptoScanner:
             print(f"Error fetching {symbol}: {e}")
             return None
 
-    def calculate_indicators(self, df):
-        """Add RSI and MACD"""
+    def add_indicators(self, df):
+        """Add RSI, MACD, Bollinger Bands, ATR, EMAs"""
         close = df['close']
+        high = df['high']
+        low = df['low']
+        vol = df['volume']
 
-        # RSI (14)
+        # RSI
         delta = close.diff()
-        gain = delta.where(delta > 0, 0).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        gain = delta.where(delta > 0, 0).rolling(14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
         rs = gain / loss
         df['rsi'] = 100 - (100 / (1 + rs))
 
-        # MACD (12,26,9)
-        exp1 = close.ewm(span=12, adjust=False).mean()
-        exp2 = close.ewm(span=26, adjust=False).mean()
+        # MACD
+        exp1 = close.ewm(span=12).mean()
+        exp2 = close.ewm(span=26).mean()
         df['macd'] = exp1 - exp2
-        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+        df['macd_signal'] = df['macd'].ewm(span=9).mean()
         df['macd_hist'] = df['macd'] - df['macd_signal']
+
+        # Bollinger Bands (20,2)
+        df['bb_mid'] = close.rolling(20).mean()
+        bb_std = close.rolling(20).std()
+        df['bb_upper'] = df['bb_mid'] + 2 * bb_std
+        df['bb_lower'] = df['bb_mid'] - 2 * bb_std
+
+        # EMAs
+        df['ema9'] = close.ewm(span=9).mean()
+        df['ema21'] = close.ewm(span=21).mean()
+        df['ema200'] = close.ewm(span=200).mean()
+
+        # ATR (14)
+        tr = pd.concat([high - low,
+                        (high - close.shift()).abs(),
+                        (low - close.shift()).abs()], axis=1).max(axis=1)
+        df['atr'] = tr.rolling(14).mean()
+
+        # Volume surge
+        df['vol_ma20'] = vol.rolling(20).mean()
+        df['vol_surge'] = vol / df['vol_ma20']
 
         return df
 
-    def generate_signals(self, df):
-        """Return buy/sell signals based on RSI and MACD"""
+    def detect_regime(self, df):
+        """Determine market regime (trending/consolidating) using ADX"""
+        close = df['close']
+        high = df['high']
+        low = df['low']
+        tr = pd.concat([high - low,
+                        (high - close.shift()).abs(),
+                        (low - close.shift()).abs()], axis=1).max(axis=1)
+        atr = tr.rolling(14).mean()
+        plus_dm = high.diff()
+        minus_dm = low.diff()
+        plus_dm[plus_dm < 0] = 0
+        minus_dm[minus_dm > 0] = 0
+        plus_di = 100 * (plus_dm.ewm(alpha=1/14).mean() / atr)
+        minus_di = 100 * (minus_dm.abs().ewm(alpha=1/14).mean() / atr)
+        dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+        adx = dx.rolling(14).mean().iloc[-1]
+        bb_width = df['bb_upper'].iloc[-1] - df['bb_lower'].iloc[-1] / df['bb_mid'].iloc[-1]
+
+        if adx > 25 and bb_width > df['bb_width'].rolling(50).mean().iloc[-1]:
+            return "TRENDING"
+        else:
+            return "RANGING"
+
+    def mean_reversion_signal(self, df):
+        """Return (direction, confidence, reason) if mean reversion setup detected"""
         last = df.iloc[-1]
         prev = df.iloc[-2]
+        score = 0
+        reasons = []
 
-        signals = []
-        # Long signal: RSI < 30 and MACD histogram rising from below zero
-        if last['rsi'] < 30 and last['macd_hist'] > prev['macd_hist'] and last['macd_hist'] < 0:
-            signals.append(('LONG', last['close']))
+        # Price near lower band
+        if last['close'] <= last['bb_lower'] * 1.01:
+            score += 20
+            reasons.append("near_lower_band")
+        # Price near upper band
+        if last['close'] >= last['bb_upper'] * 0.99:
+            score += 20
+            reasons.append("near_upper_band")
+        # RSI oversold/overbought
+        if last['rsi'] < 30:
+            score += 15
+            reasons.append("oversold")
+        if last['rsi'] > 70:
+            score += 15
+            reasons.append("overbought")
+        # MACD divergence (simplified)
+        if last['macd_hist'] > 0 and prev['macd_hist'] < 0:
+            score += 10
+            reasons.append("macd_bull_cross")
+        if last['macd_hist'] < 0 and prev['macd_hist'] > 0:
+            score += 10
+            reasons.append("macd_bear_cross")
 
-        # Short signal: RSI > 70 and MACD histogram falling from above zero
-        if last['rsi'] > 70 and last['macd_hist'] < prev['macd_hist'] and last['macd_hist'] > 0:
-            signals.append(('SHORT', last['close']))
+        if score >= 30:
+            direction = "LONG" if last['rsi'] < 50 else "SHORT"
+            return direction, score, reasons
+        return None, None, None
 
-        return signals
+    def breakout_signal(self, df):
+        """Breakout from recent range with volume"""
+        last = df.iloc[-1]
+        recent_high = df['high'].iloc[-20:-1].max()
+        recent_low = df['low'].iloc[-20:-1].min()
+        if last['close'] > recent_high and last['vol_surge'] > 1.5:
+            return "LONG", 75, ["breakout_high", f"vol_{last['vol_surge']:.1f}x"]
+        if last['close'] < recent_low and last['vol_surge'] > 1.5:
+            return "SHORT", 75, ["breakout_low", f"vol_{last['vol_surge']:.1f}x"]
+        return None, None, None
 
-    def scan_pairs(self, pair_list):
-        results = {}
-        for pair in pair_list:
+    def trend_continuation_signal(self, df):
+        """Pullback to EMA in direction of longer trend"""
+        last = df.iloc[-1]
+        trend_up = last['close'] > last['ema200']
+        trend_down = last['close'] < last['ema200']
+
+        near_ema21 = abs(last['close'] - last['ema21']) / last['ema21'] < 0.01
+        if trend_up and near_ema21 and last['rsi'] > 40:
+            return "LONG", 70, ["pullback_to_ema21", "uptrend"]
+        if trend_down and near_ema21 and last['rsi'] < 60:
+            return "SHORT", 70, ["pullback_to_ema21", "downtrend"]
+        return None, None, None
+
+    def scan_pairs(self):
+        """Scan all configured pairs, return list of signals with metadata"""
+        results = []
+        session = Session()
+        for pair in config.PAIRS:
             df = self.fetch_data(pair)
-            if df is not None:
-                df = self.calculate_indicators(df)
-                signals = self.generate_signals(df)
-                if signals:
-                    # Take the latest signal
-                    results[pair] = signals[-1]
+            if df is None or len(df) < 100:
+                continue
+            df = self.add_indicators(df)
+            regime = self.detect_regime(df)
+
+            # Try strategies in order of confidence (can be weighted)
+            signals = []
+            # Mean reversion
+            dir, conf, reasons = self.mean_reversion_signal(df)
+            if dir:
+                signals.append(('mean_reversion', dir, conf, reasons))
+            # Breakout
+            dir, conf, reasons = self.breakout_signal(df)
+            if dir:
+                signals.append(('breakout', dir, conf, reasons))
+            # Trend continuation
+            dir, conf, reasons = self.trend_continuation_signal(df)
+            if dir:
+                signals.append(('trend_continuation', dir, conf, reasons))
+
+            if signals:
+                # Pick highest confidence signal
+                best = max(signals, key=lambda x: x[2])
+                strategy, direction, confidence, reasons = best
+                price = df['close'].iloc[-1]
+                atr = df['atr'].iloc[-1]
+                # Compute stop loss and take profit based on ATR
+                if direction == 'LONG':
+                    sl = price - atr * 1.5
+                    tp = price + atr * 3
+                else:
+                    sl = price + atr * 1.5
+                    tp = price - atr * 3
+
+                # Log signal
+                log = SignalLog(
+                    pair=pair,
+                    signal_type=f"{direction}_{strategy}",
+                    price=price,
+                    confidence=confidence
+                )
+                session.add(log)
+                session.commit()
+
+                results.append({
+                    'pair': pair,
+                    'strategy': strategy,
+                    'direction': direction,
+                    'confidence': confidence,
+                    'price': price,
+                    'stop_loss': sl,
+                    'take_profit': tp,
+                    'reasons': ', '.join(reasons),
+                    'regime': regime,
+                    'timestamp': datetime.now()
+                })
         return results
