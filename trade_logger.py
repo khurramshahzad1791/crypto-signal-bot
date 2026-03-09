@@ -1,4 +1,3 @@
-# trade_logger.py
 from sqlalchemy import create_engine, Column, String, Float, DateTime, Integer, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -12,14 +11,14 @@ class Trade(Base):
     id = Column(Integer, primary_key=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     pair = Column(String)
-    signal_type = Column(String)   # e.g., "LONG_mean_reversion"
+    signal_type = Column(String)
     entry_price = Column(Float)
     exit_price = Column(Float, nullable=True)
     stop_loss = Column(Float)
     take_profit = Column(Float)
     outcome = Column(String, nullable=True)  # 'win', 'loss', 'open'
     pnl_percent = Column(Float, nullable=True)
-    confidence = Column(Integer)   # 0-100
+    confidence = Column(Integer)
 
 class SignalLog(Base):
     __tablename__ = 'signal_logs'
