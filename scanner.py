@@ -65,10 +65,6 @@ class CryptoScanner:
 
         return df
 
-    def detect_regime(self, df):
-        # Simplified regime detection (placeholder)
-        return "RANGING"
-
     def mean_reversion_signal(self, df):
         last = df.iloc[-1]
         prev = df.iloc[-2]
@@ -128,18 +124,14 @@ class CryptoScanner:
             if df is None or len(df) < 100:
                 continue
             df = self.add_indicators(df)
-            regime = self.detect_regime(df)
 
             signals = []
-            # Mean reversion
             dir, conf, reasons = self.mean_reversion_signal(df)
             if dir:
                 signals.append(('mean_reversion', dir, conf, reasons))
-            # Breakout
             dir, conf, reasons = self.breakout_signal(df)
             if dir:
                 signals.append(('breakout', dir, conf, reasons))
-            # Trend continuation
             dir, conf, reasons = self.trend_continuation_signal(df)
             if dir:
                 signals.append(('trend_continuation', dir, conf, reasons))
@@ -156,7 +148,6 @@ class CryptoScanner:
                     sl = price + atr * 1.5
                     tp = price - atr * 3
 
-                # Log signal
                 log = SignalLog(
                     pair=pair,
                     signal_type=f"{direction}_{strategy}",
@@ -175,7 +166,6 @@ class CryptoScanner:
                     'stop_loss': sl,
                     'take_profit': tp,
                     'reasons': ', '.join(reasons),
-                    'regime': regime,
                     'timestamp': datetime.now()
                 })
         return results
