@@ -13,7 +13,6 @@ class TradingChat:
     def get_response(self, user_message, recent_signals, trade_history):
         if not self.model:
             return "Chat is disabled. Set GEMINI_API_KEY in Railway variables to enable."
-        # Build context
         context = f"""You are a helpful crypto trading assistant. 
 Recent signals: {recent_signals}
 Recent trades: {trade_history}
