@@ -1,4 +1,3 @@
-# scanner.py
 import ccxt
 import pandas as pd
 import numpy as np
@@ -24,7 +23,6 @@ class CryptoScanner:
             return None
 
     def add_indicators(self, df):
-        """Add RSI, MACD, Bollinger Bands, ATR, EMAs"""
         close = df['close']
         high = df['high']
         low = df['low']
@@ -44,7 +42,7 @@ class CryptoScanner:
         df['macd_signal'] = df['macd'].ewm(span=9).mean()
         df['macd_hist'] = df['macd'] - df['macd_signal']
 
-        # Bollinger Bands (20,2)
+        # Bollinger Bands
         df['bb_mid'] = close.rolling(20).mean()
         bb_std = close.rolling(20).std()
         df['bb_upper'] = df['bb_mid'] + 2 * bb_std
@@ -55,7 +53,7 @@ class CryptoScanner:
         df['ema21'] = close.ewm(span=21).mean()
         df['ema200'] = close.ewm(span=200).mean()
 
-        # ATR (14)
+        # ATR
         tr = pd.concat([high - low,
                         (high - close.shift()).abs(),
                         (low - close.shift()).abs()], axis=1).max(axis=1)
@@ -68,52 +66,27 @@ class CryptoScanner:
         return df
 
     def detect_regime(self, df):
-        """Determine market regime (trending/consolidating) using ADX"""
-        close = df['close']
-        high = df['high']
-        low = df['low']
-        tr = pd.concat([high - low,
-                        (high - close.shift()).abs(),
-                        (low - close.shift()).abs()], axis=1).max(axis=1)
-        atr = tr.rolling(14).mean()
-        plus_dm = high.diff()
-        minus_dm = low.diff()
-        plus_dm[plus_dm < 0] = 0
-        minus_dm[minus_dm > 0] = 0
-        plus_di = 100 * (plus_dm.ewm(alpha=1/14).mean() / atr)
-        minus_di = 100 * (minus_dm.abs().ewm(alpha=1/14).mean() / atr)
-        dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
-        adx = dx.rolling(14).mean().iloc[-1]
-        bb_width = df['bb_upper'].iloc[-1] - df['bb_lower'].iloc[-1] / df['bb_mid'].iloc[-1]
-
-        if adx > 25 and bb_width > df['bb_width'].rolling(50).mean().iloc[-1]:
-            return "TRENDING"
-        else:
-            return "RANGING"
+        # Simplified regime detection (placeholder)
+        return "RANGING"
 
     def mean_reversion_signal(self, df):
-        """Return (direction, confidence, reason) if mean reversion setup detected"""
         last = df.iloc[-1]
         prev = df.iloc[-2]
         score = 0
         reasons = []
 
-        # Price near lower band
         if last['close'] <= last['bb_lower'] * 1.01:
             score += 20
             reasons.append("near_lower_band")
-        # Price near upper band
         if last['close'] >= last['bb_upper'] * 0.99:
             score += 20
             reasons.append("near_upper_band")
-        # RSI oversold/overbought
         if last['rsi'] < 30:
             score += 15
             reasons.append("oversold")
         if last['rsi'] > 70:
             score += 15
             reasons.append("overbought")
-        # MACD divergence (simplified)
         if last['macd_hist'] > 0 and prev['macd_hist'] < 0:
             score += 10
             reasons.append("macd_bull_cross")
@@ -127,7 +100,6 @@ class CryptoScanner:
         return None, None, None
 
     def breakout_signal(self, df):
-        """Breakout from recent range with volume"""
         last = df.iloc[-1]
         recent_high = df['high'].iloc[-20:-1].max()
         recent_low = df['low'].iloc[-20:-1].min()
@@ -138,11 +110,9 @@ class CryptoScanner:
         return None, None, None
 
     def trend_continuation_signal(self, df):
-        """Pullback to EMA in direction of longer trend"""
         last = df.iloc[-1]
         trend_up = last['close'] > last['ema200']
         trend_down = last['close'] < last['ema200']
-
         near_ema21 = abs(last['close'] - last['ema21']) / last['ema21'] < 0.01
         if trend_up and near_ema21 and last['rsi'] > 40:
             return "LONG", 70, ["pullback_to_ema21", "uptrend"]
@@ -151,7 +121,6 @@ class CryptoScanner:
         return None, None, None
 
     def scan_pairs(self):
-        """Scan all configured pairs, return list of signals with metadata"""
         results = []
         session = Session()
         for pair in config.PAIRS:
@@ -161,7 +130,6 @@ class CryptoScanner:
             df = self.add_indicators(df)
             regime = self.detect_regime(df)
 
-            # Try strategies in order of confidence (can be weighted)
             signals = []
             # Mean reversion
             dir, conf, reasons = self.mean_reversion_signal(df)
@@ -177,12 +145,10 @@ class CryptoScanner:
                 signals.append(('trend_continuation', dir, conf, reasons))
 
             if signals:
-                # Pick highest confidence signal
                 best = max(signals, key=lambda x: x[2])
                 strategy, direction, confidence, reasons = best
                 price = df['close'].iloc[-1]
                 atr = df['atr'].iloc[-1]
-                # Compute stop loss and take profit based on ATR
                 if direction == 'LONG':
                     sl = price - atr * 1.5
                     tp = price + atr * 3
