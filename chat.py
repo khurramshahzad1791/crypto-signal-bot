@@ -4,16 +4,26 @@ import config
 class TradingChat:
     def __init__(self):
         self.api_key = config.GEMINI_API_KEY
+        self.model = None
         if self.api_key:
             genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
-        else:
-            self.model = None
+            # Try different model names (free tier)
+            for model_name in ['gemini-1.5-pro', 'gemini-1.0-pro', 'models/gemini-1.5-pro']:
+                try:
+                    self.model = genai.GenerativeModel(model_name)
+                    # Test with a simple prompt to confirm
+                    self.model.generate_content("test")
+                    print(f"Using model: {model_name}")
+                    break
+                except Exception as e:
+                    print(f"Model {model_name} failed: {e}")
+                    continue
+            if not self.model:
+                print("No working model found.")
 
     def get_response(self, user_message, recent_signals, trade_history):
         if not self.model:
-            return "Chat is disabled. Set GEMINI_API_KEY in Railway variables to enable."
-        # Build context
+            return "Chat is disabled or model not available. Check API key and model access."
         signals_text = "\n".join([f"{s['pair']} {s['direction']} at {s['price']}" for s in recent_signals]) if recent_signals else "No recent signals."
         trades_text = "\n".join([f"{t['pair']} {t['outcome']}" for t in trade_history]) if trade_history else "No trade history."
         prompt = f"""You are a helpful crypto trading assistant.
