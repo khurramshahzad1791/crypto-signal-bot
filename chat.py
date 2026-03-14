@@ -10,12 +10,13 @@ class TradingChat:
         self.model = None
         if self.api_key:
             genai.configure(api_key=self.api_key)
-            # List available models for debugging (visible in Railway logs)
+            # List available models for debugging
             try:
                 models = genai.list_models()
-                logger.info("Available models:")
+                logger.info("Available models that support generateContent:")
                 for m in models:
-                    logger.info(f" - {m.name}")
+                    if 'generateContent' in m.supported_generation_methods:
+                        logger.info(f" - {m.name}")
             except Exception as e:
                 logger.error(f"Could not list models: {e}")
 
@@ -23,21 +24,29 @@ class TradingChat:
             model_names = [
                 'models/gemini-1.5-flash',
                 'gemini-1.5-flash',
+                'models/gemini-1.5-flash-8b',
+                'gemini-1.5-flash-8b',
                 'models/gemini-1.5-pro',
-                'gemini-1.5-pro'
+                'gemini-1.5-pro',
+                'models/gemini-1.0-pro',
+                'gemini-1.0-pro'
             ]
             for model_name in model_names:
                 try:
                     self.model = genai.GenerativeModel(model_name)
                     # Quick test
-                    self.model.generate_content("test")
-                    logger.info(f"Chat using model: {model_name}")
-                    break
+                    response = self.model.generate_content("Say 'test'")
+                    if response and response.text:
+                        logger.info(f"Chat using model: {model_name} – success")
+                        break
                 except Exception as e:
                     logger.warning(f"Model {model_name} failed: {e}")
+                    self.model = None
                     continue
             if not self.model:
                 logger.error("No working Gemini model found.")
+        else:
+            logger.error("GEMINI_API_KEY not set.")
 
     def get_response(self, user_message, recent_signals, trade_history):
         if not self.model:
