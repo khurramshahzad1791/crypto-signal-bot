@@ -10,7 +10,7 @@ class TradingChat:
         self.model = None
         if self.api_key:
             genai.configure(api_key=self.api_key)
-            # List available models for debugging
+            # List available models for debugging (visible in Railway logs)
             try:
                 models = genai.list_models()
                 logger.info("Available models:")
@@ -19,7 +19,7 @@ class TradingChat:
             except Exception as e:
                 logger.error(f"Could not list models: {e}")
 
-            # Try different model names (common free models)
+            # Try common free model names
             model_names = [
                 'models/gemini-1.5-flash',
                 'gemini-1.5-flash',
