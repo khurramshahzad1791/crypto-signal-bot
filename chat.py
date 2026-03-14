@@ -10,12 +10,21 @@ class TradingChat:
         self.model = None
         if self.api_key:
             genai.configure(api_key=self.api_key)
-            # List of possible model names (free tier)
+            # List available models for debugging
+            try:
+                models = genai.list_models()
+                logger.info("Available models:")
+                for m in models:
+                    logger.info(f" - {m.name}")
+            except Exception as e:
+                logger.error(f"Could not list models: {e}")
+
+            # Try different model names (common free models)
             model_names = [
-                'gemini-1.5-flash',
-                'gemini-1.5-pro',
                 'models/gemini-1.5-flash',
-                'models/gemini-1.5-pro'
+                'gemini-1.5-flash',
+                'models/gemini-1.5-pro',
+                'gemini-1.5-pro'
             ]
             for model_name in model_names:
                 try:
