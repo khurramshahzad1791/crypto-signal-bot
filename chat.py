@@ -1,5 +1,8 @@
 import google.generativeai as genai
 import config
+import logging
+
+logger = logging.getLogger(__name__)
 
 class TradingChat:
     def __init__(self):
@@ -7,23 +10,29 @@ class TradingChat:
         self.model = None
         if self.api_key:
             genai.configure(api_key=self.api_key)
-            # Try different model names (free tier)
-            for model_name in ['gemini-1.5-pro', 'gemini-1.0-pro', 'models/gemini-1.5-pro']:
+            # List of possible model names (free tier)
+            model_names = [
+                'gemini-1.5-flash',
+                'gemini-1.5-pro',
+                'models/gemini-1.5-flash',
+                'models/gemini-1.5-pro'
+            ]
+            for model_name in model_names:
                 try:
                     self.model = genai.GenerativeModel(model_name)
-                    # Test with a simple prompt to confirm
+                    # Quick test
                     self.model.generate_content("test")
-                    print(f"Using model: {model_name}")
+                    logger.info(f"Chat using model: {model_name}")
                     break
                 except Exception as e:
-                    print(f"Model {model_name} failed: {e}")
+                    logger.warning(f"Model {model_name} failed: {e}")
                     continue
             if not self.model:
-                print("No working model found.")
+                logger.error("No working Gemini model found.")
 
     def get_response(self, user_message, recent_signals, trade_history):
         if not self.model:
-            return "Chat is disabled or model not available. Check API key and model access."
+            return "Chat is disabled or model not available. Check API key and model access in Google AI Studio."
         signals_text = "\n".join([f"{s['pair']} {s['direction']} at {s['price']}" for s in recent_signals]) if recent_signals else "No recent signals."
         trades_text = "\n".join([f"{t['pair']} {t['outcome']}" for t in trade_history]) if trade_history else "No trade history."
         prompt = f"""You are a helpful crypto trading assistant.
