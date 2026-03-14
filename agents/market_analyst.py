@@ -6,19 +6,19 @@ from datetime import datetime
 class MarketAnalyst:
     def __init__(self):
         self.exchange = ccxt.mexc({'enableRateLimit': True})
+        self.pairs = ["BTC/USDT", "ETH/USDT", "XRP/USDT", "SOL/USDT"]
 
     async def analyze(self):
-        try:
-            # For simplicity, analyze only BTC/USDT
-            df = self.fetch_ohlcv('BTC/USDT', '5m', 200)
+        signals = []
+        for pair in self.pairs:
+            df = self.fetch_ohlcv(pair, '5m', 200)
             if df is None:
-                return None
+                continue
             df = self.add_indicators(df)
-            signal = self.generate_signal(df)
-            return signal
-        except Exception as e:
-            print(f"MarketAnalyst error: {e}")
-            return None
+            signal = self.generate_signal(pair, df)
+            if signal:
+                signals.append(signal)
+        return signals
 
     def fetch_ohlcv(self, symbol, timeframe, limit):
         try:
@@ -31,38 +31,92 @@ class MarketAnalyst:
 
     def add_indicators(self, df):
         close = df['close']
+        high = df['high']
+        low = df['low']
+        vol = df['volume']
+
+        # RSI
         delta = close.diff()
         gain = delta.where(delta > 0, 0).rolling(14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
         rs = gain / loss
         df['rsi'] = 100 - (100 / (1 + rs))
 
+        # Bollinger Bands
+        df['bb_mid'] = close.rolling(20).mean()
+        bb_std = close.rolling(20).std()
+        df['bb_upper'] = df['bb_mid'] + 2 * bb_std
+        df['bb_lower'] = df['bb_mid'] - 2 * bb_std
+
+        # EMAs
         df['ema9'] = close.ewm(span=9).mean()
         df['ema21'] = close.ewm(span=21).mean()
         df['ema200'] = close.ewm(span=200).mean()
+
+        # ATR
+        tr = pd.concat([high - low,
+                        (high - close.shift()).abs(),
+                        (low - close.shift()).abs()], axis=1).max(axis=1)
+        df['atr'] = tr.rolling(14).mean()
+
+        # Volume surge
+        df['vol_ma20'] = vol.rolling(20).mean()
+        df['vol_surge'] = vol / df['vol_ma20']
+
         return df
 
-    def generate_signal(self, df):
+    def generate_signal(self, pair, df):
         last = df.iloc[-1]
-        # Simple RSI strategy
-        if last['rsi'] < 30:
-            return {
-                'pair': 'BTC/USDT',
-                'direction': 'LONG',
-                'price': last['close'],
-                'confidence': 80,
-                'stop_loss': last['close'] * 0.98,
-                'take_profit': last['close'] * 1.05,
-                'reason': 'RSI oversold'
-            }
-        if last['rsi'] > 70:
-            return {
-                'pair': 'BTC/USDT',
-                'direction': 'SHORT',
-                'price': last['close'],
-                'confidence': 80,
-                'stop_loss': last['close'] * 1.02,
-                'take_profit': last['close'] * 0.95,
-                'reason': 'RSI overbought'
-            }
-        return None
+        prev = df.iloc[-2]
+        reasons = []
+        confidence = 50
+
+        # Mean Reversion
+        if last['close'] <= last['bb_lower'] and last['rsi'] < 30:
+            direction = 'LONG'
+            confidence = 75
+            reasons.append('oversold bounce')
+        elif last['close'] >= last['bb_upper'] and last['rsi'] > 70:
+            direction = 'SHORT'
+            confidence = 75
+            reasons.append('overbought rejection')
+        # Breakout
+        elif last['vol_surge'] > 1.5 and last['close'] > df['high'].iloc[-20:-1].max():
+            direction = 'LONG'
+            confidence = 80
+            reasons.append('breakout with volume')
+        elif last['vol_surge'] > 1.5 and last['close'] < df['low'].iloc[-20:-1].min():
+            direction = 'SHORT'
+            confidence = 80
+            reasons.append('breakdown with volume')
+        # Trend continuation
+        elif last['close'] > last['ema200'] and abs(last['close'] - last['ema21']) / last['ema21'] < 0.01:
+            direction = 'LONG'
+            confidence = 70
+            reasons.append('pullback to EMA21 in uptrend')
+        elif last['close'] < last['ema200'] and abs(last['close'] - last['ema21']) / last['ema21'] < 0.01:
+            direction = 'SHORT'
+            confidence = 70
+            reasons.append('pullback to EMA21 in downtrend')
+        else:
+            return None
+
+        # Calculate stop loss and take profit based on ATR
+        atr = last['atr']
+        if direction == 'LONG':
+            sl = last['close'] - atr * 1.5
+            tp = last['close'] + atr * 3
+        else:
+            sl = last['close'] + atr * 1.5
+            tp = last['close'] - atr * 3
+
+        return {
+            'pair': pair,
+            'direction': direction,
+            'price': last['close'],
+            'confidence': confidence,
+            'stop_loss': sl,
+            'take_profit': tp,
+            'reasons': ', '.join(reasons),
+            'timestamp': datetime.now()
+        }
