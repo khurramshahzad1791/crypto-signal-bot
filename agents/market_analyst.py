@@ -2,6 +2,9 @@ import ccxt
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 class MarketAnalyst:
     def __init__(self):
@@ -11,13 +14,18 @@ class MarketAnalyst:
     async def analyze(self):
         signals = []
         for pair in self.pairs:
-            df = self.fetch_ohlcv(pair, '5m', 200)
-            if df is None:
-                continue
-            df = self.add_indicators(df)
-            signal = self.generate_signal(pair, df)
-            if signal:
-                signals.append(signal)
+            try:
+                df = self.fetch_ohlcv(pair, '5m', 200)
+                if df is None:
+                    logger.warning(f"Could not fetch data for {pair}")
+                    continue
+                df = self.add_indicators(df)
+                signal = self.generate_signal(pair, df)
+                if signal:
+                    signals.append(signal)
+            except Exception as e:
+                logger.error(f"Error analyzing {pair}: {e}")
+        logger.info(f"Market analyst generated {len(signals)} signals")
         return signals
 
     def fetch_ohlcv(self, symbol, timeframe, limit):
@@ -26,7 +34,8 @@ class MarketAnalyst:
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             return df
-        except:
+        except Exception as e:
+            logger.error(f"Fetch error for {symbol}: {e}")
             return None
 
     def add_indicators(self, df):
@@ -35,31 +44,26 @@ class MarketAnalyst:
         low = df['low']
         vol = df['volume']
 
-        # RSI
         delta = close.diff()
         gain = delta.where(delta > 0, 0).rolling(14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
         rs = gain / loss
         df['rsi'] = 100 - (100 / (1 + rs))
 
-        # Bollinger Bands
         df['bb_mid'] = close.rolling(20).mean()
         bb_std = close.rolling(20).std()
         df['bb_upper'] = df['bb_mid'] + 2 * bb_std
         df['bb_lower'] = df['bb_mid'] - 2 * bb_std
 
-        # EMAs
         df['ema9'] = close.ewm(span=9).mean()
         df['ema21'] = close.ewm(span=21).mean()
         df['ema200'] = close.ewm(span=200).mean()
 
-        # ATR
         tr = pd.concat([high - low,
                         (high - close.shift()).abs(),
                         (low - close.shift()).abs()], axis=1).max(axis=1)
         df['atr'] = tr.rolling(14).mean()
 
-        # Volume surge
         df['vol_ma20'] = vol.rolling(20).mean()
         df['vol_surge'] = vol / df['vol_ma20']
 
@@ -101,7 +105,6 @@ class MarketAnalyst:
         else:
             return None
 
-        # Calculate stop loss and take profit based on ATR
         atr = last['atr']
         if direction == 'LONG':
             sl = last['close'] - atr * 1.5
