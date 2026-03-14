@@ -10,7 +10,7 @@ class TradingChat:
         self.model = None
         if self.api_key:
             genai.configure(api_key=self.api_key)
-            # List available models for debugging
+            # Log available models for debugging (optional)
             try:
                 models = genai.list_models()
                 logger.info("Available models that support generateContent:")
@@ -20,18 +20,18 @@ class TradingChat:
             except Exception as e:
                 logger.error(f"Could not list models: {e}")
 
-            # Try common free model names
-            model_names = [
-                'models/gemini-1.5-flash',
-                'gemini-1.5-flash',
-                'models/gemini-1.5-flash-8b',
-                'gemini-1.5-flash-8b',
-                'models/gemini-1.5-pro',
-                'gemini-1.5-pro',
-                'models/gemini-1.0-pro',
-                'gemini-1.0-pro'
+            # Try models from your logs that are likely free and work
+            model_candidates = [
+                'models/gemini-flash-lite-latest',
+                'models/gemini-2.0-flash',
+                'models/gemini-pro-latest',
+                'models/gemini-2.0-flash-001',
+                'models/gemini-2.0-flash-lite',
+                'models/gemini-2.5-flash',
+                'models/gemini-3-flash-preview',
+                'models/gemma-3-12b-it',
             ]
-            for model_name in model_names:
+            for model_name in model_candidates:
                 try:
                     self.model = genai.GenerativeModel(model_name)
                     # Quick test
