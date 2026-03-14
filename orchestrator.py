@@ -44,7 +44,7 @@ class TradingOrchestrator:
         self.scan_count = 0
         self.status_message = "Initializing..."
         self.last_error = None
-        self.lock = threading.Lock()  # for thread-safe access
+        self.lock = threading.Lock()  # thread safety for signals list
 
     async def run_cycle(self):
         try:
@@ -75,10 +75,9 @@ class TradingOrchestrator:
     async def run_forever(self):
         while self.running:
             await self.run_cycle()
-            await asyncio.sleep(300)
+            await asyncio.sleep(300)  # 5 minutes
 
-# Global orchestrator instance (will be stored in session state)
-orchestrator = None
+# Global flag to start background thread only once
 background_thread_started = False
 
 def start_background_loop(orchestrator_ref):
@@ -87,12 +86,12 @@ def start_background_loop(orchestrator_ref):
     loop.run_until_complete(orchestrator_ref.run_forever())
 
 def main():
-    global orchestrator, background_thread_started
+    global background_thread_started
 
     st.set_page_config(page_title="AI Trading System", layout="wide")
     st.title("🤖 Multi‑Agent AI Trading System")
 
-    # Initialize orchestrator in session state
+    # Initialize orchestrator in session state (persists across reruns)
     if 'orchestrator' not in st.session_state:
         st.session_state.orchestrator = TradingOrchestrator()
         # Start background thread only once
