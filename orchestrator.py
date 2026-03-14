@@ -16,9 +16,11 @@ from agents.risk_manager import RiskManager
 from agents.execution_optimizer import ExecutionOptimizer
 from chat import TradingChat
 
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ---------- FastAPI app (for health checks and API) ----------
 app = FastAPI(title="Multi-Agent Trading System")
 
 @app.get("/")
@@ -29,6 +31,7 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
+# ---------- Trading Orchestrator ----------
 class TradingOrchestrator:
     def __init__(self):
         self.agents = {
@@ -44,9 +47,10 @@ class TradingOrchestrator:
         self.scan_count = 0
         self.status_message = "Initializing..."
         self.last_error = None
-        self.lock = threading.Lock()  # thread safety for signals list
+        self.lock = threading.Lock()  # for thread-safe signal updates
 
     async def run_cycle(self):
+        """One analysis cycle – updates signals and status"""
         try:
             self.status_message = "Scanning markets..."
             self.last_error = None
@@ -73,18 +77,24 @@ class TradingOrchestrator:
             self.status_message = f"Error in scan: {str(e)}"
 
     async def run_forever(self):
+        """Background loop – runs every 5 minutes"""
         while self.running:
             await self.run_cycle()
             await asyncio.sleep(300)  # 5 minutes
 
-# Global flag to start background thread only once
+# Global flag to start background thread only once (per interpreter)
 background_thread_started = False
 
 def start_background_loop(orchestrator_ref):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(orchestrator_ref.run_forever())
+    """Runs the async background loop in a separate thread"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(orchestrator_ref.run_forever())
+    except Exception as e:
+        logger.error(f"Background thread crashed: {e}", exc_info=True)
 
+# ---------- Streamlit UI ----------
 def main():
     global background_thread_started
 
@@ -94,14 +104,20 @@ def main():
     # Initialize orchestrator in session state (persists across reruns)
     if 'orchestrator' not in st.session_state:
         st.session_state.orchestrator = TradingOrchestrator()
-        # Start background thread only once
+        # Start background thread only once (first time the app loads)
         if not background_thread_started:
-            thread = threading.Thread(target=start_background_loop, args=(st.session_state.orchestrator,), daemon=True)
+            thread = threading.Thread(
+                target=start_background_loop,
+                args=(st.session_state.orchestrator,),
+                daemon=True
+            )
             thread.start()
             background_thread_started = True
+            logger.info("Background thread started.")
 
     orch = st.session_state.orchestrator
 
+    # Sidebar status panel
     with st.sidebar:
         st.header("System Status")
         st.write(f"Agents active: {len(orch.agents)}")
@@ -113,12 +129,14 @@ def main():
 
         if st.button("🔄 Scan Now"):
             with st.spinner("Scanning..."):
+                # Run one cycle synchronously (blocks UI temporarily)
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(orch.run_cycle())
                 st.success("Scan complete!")
                 st.rerun()
 
+    # Tabs
     tab1, tab2, tab3 = st.tabs(["📡 Signals", "📊 Performance", "💬 Chat"])
 
     with tab1:
