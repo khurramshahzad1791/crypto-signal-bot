@@ -14,6 +14,7 @@ from agents.news_sentiment import NewsSentimentAgent
 from agents.technical_strategist import TechnicalStrategist
 from agents.risk_manager import RiskManager
 from agents.execution_optimizer import ExecutionOptimizer
+from chat import TradingChat  # <-- added chat import
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,38 +42,40 @@ class TradingOrchestrator:
         }
         self.signals = []
         self.running = True
+        self.last_scan_time = None
+        self.scan_count = 0
+        self.status_message = "Initializing..."
 
     async def run_cycle(self):
-        """One analysis cycle"""
+        """One analysis cycle – updates signals and status"""
         try:
-            # Market analyst signal
-            ma_signal = await self.agents['market_analyst'].analyze()
-            # Technical strategist signal
+            self.status_message = "Scanning markets..."
+            # Market analyst now returns a list of signals (multiple pairs/strategies)
+            market_signals = await self.agents['market_analyst'].analyze()
+            
+            # Technical strategist (placeholder – can be expanded later)
             ts_signal = await self.agents['technical_strategist'].analyze()
             # News sentiment
             news = await self.agents['news_sentiment'].analyze()
 
-            # Combine signals
-            if ma_signal and ts_signal and ma_signal['pair'] == ts_signal['pair']:
-                if ma_signal['direction'] == ts_signal['direction']:
-                    confidence = (ma_signal['confidence'] + ts_signal['confidence']) / 2
-                    # Risk check
-                    risk_ok = await self.agents['risk_manager'].check(ma_signal, confidence)
-                    if risk_ok and confidence >= 70:
-                        signal = {
-                            'timestamp': datetime.now(),
-                            'pair': ma_signal['pair'],
-                            'direction': ma_signal['direction'],
-                            'entry': ma_signal['price'],
-                            'stop_loss': ma_signal['stop_loss'],
-                            'take_profit': ma_signal['take_profit'],
-                            'confidence': confidence,
-                            'news_sentiment': news['sentiment']
-                        }
-                        self.signals.append(signal)
-                        logger.info(f"Signal generated: {signal}")
+            # Process market signals
+            if market_signals:
+                for signal in market_signals:
+                    # Add timestamp if missing
+                    if 'timestamp' not in signal:
+                        signal['timestamp'] = datetime.now()
+                    # Optionally add news sentiment to signal
+                    signal['news_sentiment'] = news['sentiment']
+                    self.signals.append(signal)
+                    logger.info(f"Signal generated: {signal}")
+                self.scan_count += len(market_signals)
+            
+            self.last_scan_time = datetime.now()
+            self.status_message = f"Last scan: {self.last_scan_time.strftime('%H:%M:%S')} – {len(market_signals) if market_signals else 0} signals found."
+            
         except Exception as e:
             logger.error(f"Cycle error: {e}")
+            self.status_message = f"Error in scan: {str(e)}"
 
     async def run_forever(self):
         while self.running:
@@ -94,11 +97,23 @@ def main():
     st.set_page_config(page_title="AI Trading System", layout="wide")
     st.title("🤖 Multi‑Agent AI Trading System")
 
-    # Sidebar
+    # Sidebar with status and manual scan button
     with st.sidebar:
-        st.header("Status")
+        st.header("System Status")
         st.write(f"Agents active: {len(orchestrator.agents)}")
-        st.write(f"Signals generated: {len(orchestrator.signals)}")
+        st.write(f"Total signals generated: {len(orchestrator.signals)}")
+        st.write(f"Last scan: {orchestrator.last_scan_time.strftime('%H:%M:%S') if orchestrator.last_scan_time else 'Never'}")
+        st.write(f"Status: {orchestrator.status_message}")
+        
+        # Manual scan button
+        if st.button("🔄 Scan Now"):
+            with st.spinner("Scanning..."):
+                # Run a cycle synchronously (blocks UI briefly)
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(orchestrator.run_cycle())
+                st.success("Scan complete!")
+                st.rerun()
 
     # Tabs
     tab1, tab2, tab3 = st.tabs(["📡 Signals", "📊 Performance", "💬 Chat"])
@@ -106,7 +121,8 @@ def main():
     with tab1:
         st.subheader("Live Signals")
         if orchestrator.signals:
-            df = pd.DataFrame(orchestrator.signals[-20:])
+            # Show most recent signals first (reverse order)
+            df = pd.DataFrame(orchestrator.signals[-20:][::-1])
             st.dataframe(df, use_container_width=True)
         else:
             st.info("No signals yet. Waiting for market analysis...")
@@ -117,12 +133,18 @@ def main():
 
     with tab3:
         st.subheader("AI Chat Assistant")
-        st.write("Chat with your trading assistant (requires API key).")
-        user_input = st.text_input("You:")
-        if user_input:
-            # Placeholder for LLM response
-            st.text_area("Assistant:", "AI response placeholder – configure API key to enable.")
+        # Initialize chat if not in session state
+        if 'chat' not in st.session_state:
+            st.session_state.chat = TradingChat()
+        
+        user_input = st.text_input("You:", key="chat_input")
+        if st.button("Send"):
+            if user_input:
+                # Get recent signals for context
+                recent_signals = orchestrator.signals[-5:] if orchestrator.signals else []
+                # Trade history not implemented yet
+                response = st.session_state.chat.get_response(user_input, recent_signals, [])
+                st.text_area("Assistant:", response, height=200)
 
 if __name__ == "__main__":
-    # If script is run directly, start Streamlit
     main()
