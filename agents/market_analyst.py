@@ -74,34 +74,41 @@ class MarketAnalyst:
         prev = df.iloc[-2]
         reasons = []
         confidence = 50
+        strategy = None
 
         # Mean Reversion
         if last['close'] <= last['bb_lower'] and last['rsi'] < 30:
             direction = 'LONG'
             confidence = 75
             reasons.append('oversold bounce')
+            strategy = 'mean_reversion'
         elif last['close'] >= last['bb_upper'] and last['rsi'] > 70:
             direction = 'SHORT'
             confidence = 75
             reasons.append('overbought rejection')
+            strategy = 'mean_reversion'
         # Breakout
         elif last['vol_surge'] > 1.5 and last['close'] > df['high'].iloc[-20:-1].max():
             direction = 'LONG'
             confidence = 80
             reasons.append('breakout with volume')
+            strategy = 'breakout'
         elif last['vol_surge'] > 1.5 and last['close'] < df['low'].iloc[-20:-1].min():
             direction = 'SHORT'
             confidence = 80
             reasons.append('breakdown with volume')
+            strategy = 'breakout'
         # Trend continuation
         elif last['close'] > last['ema200'] and abs(last['close'] - last['ema21']) / last['ema21'] < 0.01:
             direction = 'LONG'
             confidence = 70
             reasons.append('pullback to EMA21 in uptrend')
+            strategy = 'trend_continuation'
         elif last['close'] < last['ema200'] and abs(last['close'] - last['ema21']) / last['ema21'] < 0.01:
             direction = 'SHORT'
             confidence = 70
             reasons.append('pullback to EMA21 in downtrend')
+            strategy = 'trend_continuation'
         else:
             return None
 
@@ -116,6 +123,7 @@ class MarketAnalyst:
         return {
             'pair': pair,
             'direction': direction,
+            'strategy': strategy,
             'price': last['close'],
             'confidence': confidence,
             'stop_loss': sl,
