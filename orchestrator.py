@@ -315,7 +315,6 @@ def main():
         col1, col2 = st.columns([1, 3])
         with col1:
             chart_pair = st.selectbox("Select Pair", orch.agents['market_analyst'].pairs)
-            # Timeframe selection – now includes 15m and 30m
             tf_map = {
                 "15m": 15,
                 "30m": 30,
@@ -324,12 +323,10 @@ def main():
                 "1d": 1440,
                 "1w": 10080
             }
-            selected_tf = st.selectbox("Timeframe", list(tf_map.keys()), index=2)  # default to 1h
+            selected_tf = st.selectbox("Timeframe", list(tf_map.keys()), index=2)
             tf_minutes = tf_map[selected_tf]
             chart_days = st.slider("Days of history", 1, 30, 7)
-            # Chart type
             chart_type = st.selectbox("Chart Type", ["Candlestick", "Line", "Heikin-Ashi"], index=0)
-            # Indicators
             indicators = st.multiselect("Indicators", ["EMA20", "EMA50", "Bollinger Bands", "RSI"], default=["EMA20", "EMA50"])
             show_support = st.checkbox("Show Support/Resistance", True)
             show_trendlines = st.checkbox("Show Trendlines", True)
@@ -337,13 +334,11 @@ def main():
                 st.rerun()
         with col2:
             ma = orch.agents['market_analyst']
-            # Calculate number of candles needed – cap at 1000 to avoid excessive API calls
             limit = min(chart_days * 24 * 60 // tf_minutes, 1000)
             df = ma.fetch_ohlcv(chart_pair, selected_tf, limit=limit)
             if df is not None:
-                # Build figure with subplots if RSI or volume
                 has_rsi = "RSI" in indicators
-                has_volume = True  # always show volume
+                has_volume = True
                 rows = 1 + (1 if has_volume else 0) + (1 if has_rsi else 0)
                 row_heights = [0.6] + ([0.2] if has_volume else []) + ([0.2] if has_rsi else [])
                 fig = make_subplots(
@@ -354,7 +349,6 @@ def main():
                     row_heights=row_heights
                 )
 
-                # Price chart
                 row_idx = 1
                 if chart_type == "Candlestick":
                     fig.add_trace(go.Candlestick(
@@ -376,10 +370,9 @@ def main():
                         line=dict(color='#2196f3')
                     ), row=row_idx, col=1)
                 elif chart_type == "Heikin-Ashi":
-                    # Heikin-Ashi calculation
                     ha_close = (df['open'] + df['high'] + df['low'] + df['close']) / 4
                     ha_open = (df['open'].shift(1) + ha_close.shift(1)) / 2
-                    ha_open.iloc[0] = df['open'].iloc[0]  # first value
+                    ha_open.iloc[0] = df['open'].iloc[0]
                     ha_high = df[['high', ha_open.name, ha_close.name]].max(axis=1)
                     ha_low = df[['low', ha_open.name, ha_close.name]].min(axis=1)
                     fig.add_trace(go.Candlestick(
@@ -391,7 +384,6 @@ def main():
                         name='Heikin-Ashi'
                     ), row=row_idx, col=1)
 
-                # Indicators
                 if "EMA20" in indicators:
                     ema20 = df['close'].ewm(span=20).mean()
                     fig.add_trace(go.Scatter(x=df['timestamp'], y=ema20, name='EMA20', line=dict(color='orange')), row=row_idx, col=1)
@@ -407,7 +399,6 @@ def main():
                     fig.add_trace(go.Scatter(x=df['timestamp'], y=bb_lower, name='BB Lower', line=dict(color='gray', dash='dash')), row=row_idx, col=1)
                     fig.add_trace(go.Scatter(x=df['timestamp'], y=bb_mid, name='BB Mid', line=dict(color='gray')), row=row_idx, col=1)
 
-                # Support/Resistance detection (simplified pivots)
                 highs = df['high'].values
                 lows = df['low'].values
                 support_levels = []
@@ -431,13 +422,11 @@ def main():
                         y_vals = [resistance_levels[-2][1], resistance_levels[-1][1]]
                         fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines', name='Downtrend', line=dict(color='red', dash='dash')), row=row_idx, col=1)
 
-                # Volume
                 if has_volume:
                     row_idx += 1
                     colors = ['red' if c < o else 'green' for c, o in zip(df['close'], df['open'])]
                     fig.add_trace(go.Bar(x=df['timestamp'], y=df['volume'], name='Volume', marker_color=colors), row=row_idx, col=1)
 
-                # RSI
                 if has_rsi:
                     row_idx += 1
                     delta = df['close'].diff()
@@ -460,7 +449,6 @@ def main():
                 fig.update_xaxes(rangeslider_visible=False)
                 st.plotly_chart(fig, use_container_width=False, width=1000)
 
-                # Chat about chart
                 st.subheader("Ask about this chart")
                 chart_query = st.text_input("Your question about the chart:")
                 if st.button("Ask Gemini about chart"):
@@ -490,24 +478,23 @@ def main():
             st.chat_message("user").markdown(agent_query)
             st.session_state.agent_chat_history.append({"role": "user", "content": agent_query})
 
-            # Get news sentiment (async hack)
-            news_ctx = "Neutral"
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                news_result = loop.run_until_complete(orch.agents['news_sentiment'].analyze())
-                news_ctx = news_result.get('summary', 'Neutral')
-            except:
-                pass
+            # Get recent signals and trades for context
+            recent_signals = orch.signals[-5:] if orch.signals else []
+            db_session = Session()
+            recent_trades = db_session.query(Trade).order_by(Trade.timestamp.desc()).limit(5).all()
 
-            market_ctx = "Market Analyst: " + (str(orch.signals[-3:]) if orch.signals else "No recent signals")
+            # Build prompt with context
+            market_ctx = "Market Analyst: " + (str([(s['pair'], s['direction'], s['confidence']) for s in recent_signals]) if recent_signals else "No recent signals")
+            news_ctx = "News Sentiment: " + (str(orch.agents['news_sentiment'].analyze()) if hasattr(orch.agents['news_sentiment'], 'analyze') else "Neutral")
+            trades_ctx = "Recent trades: " + (str([(t.pair, t.outcome, t.pnl_percent) for t in recent_trades]) if recent_trades else "No trades yet.")
+
             prompt = f"""You are a team of trading agents: market analyst, news analyst, technical strategist, risk manager, and execution optimizer.
 A user asks: {agent_query}
 Provide a collaborative answer incorporating insights from each agent. Be concise and helpful.
-Current context: {market_ctx} | News Sentiment: {news_ctx}
+Current context: {market_ctx} | {news_ctx} | {trades_ctx}
 """
             if 'chat' in st.session_state:
-                response = st.session_state.chat.get_response(prompt, [], [])
+                response = st.session_state.chat.get_response(prompt, recent_signals, recent_trades)
                 with st.chat_message("assistant"):
                     st.markdown(response)
                 st.session_state.agent_chat_history.append({"role": "assistant", "content": response})
