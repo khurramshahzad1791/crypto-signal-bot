@@ -9,31 +9,29 @@ from datetime import datetime, timedelta
 
 class StrategyLearner:
     def __init__(self):
-        self.model_path = config.MODEL_PATH
+        self.model_path = os.path.join(config.MODEL_PATH, 'model.pkl')
         self.model = None
-        if os.path.exists(self.model_path + 'model.pkl'):
+        if os.path.exists(self.model_path):
             try:
-                self.model = joblib.load(self.model_path + 'model.pkl')
+                self.model = joblib.load(self.model_path)
             except:
                 self.model = None
 
     def prepare_training_data(self):
-        """Fetch historical signals and their outcomes to create a dataset."""
+        """Fetch historical signals and their outcomes."""
         session = Session()
-        # Get trades from last 90 days
         cutoff = datetime.utcnow() - timedelta(days=90)
         trades = session.query(Trade).filter(Trade.timestamp >= cutoff).all()
         if len(trades) < 20:
-            return None, None  # Not enough data
+            return None, None
 
-        # Feature engineering: use signal features and outcome
         data = []
         for t in trades:
-            # Simple features: confidence, maybe direction encoded
+            # Simple features
             features = {
                 'confidence': t.confidence,
                 'direction_long': 1 if 'LONG' in t.signal_type else 0,
-                'pair_encoded': hash(t.pair) % 10,  # simple encoding
+                'pair_encoded': hash(t.pair) % 10,
                 'outcome': 1 if t.outcome == 'win' else 0
             }
             data.append(features)
@@ -47,7 +45,6 @@ class StrategyLearner:
         if X is None:
             print("Not enough data to train yet. Need at least 20 trades.")
             return
-        # Train LightGBM
         train_data = lgb.Dataset(X, label=y)
         params = {
             'objective': 'binary',
@@ -58,16 +55,13 @@ class StrategyLearner:
             'feature_fraction': 0.9
         }
         self.model = lgb.train(params, train_data, num_boost_round=50)
-        # Save model
-        os.makedirs(config.MODEL_PATH, exist_ok=True)
-        joblib.dump(self.model, config.MODEL_PATH + 'model.pkl')
-        print(f"Model trained and saved to {config.MODEL_PATH}model.pkl")
+        os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+        joblib.dump(self.model, self.model_path)
+        print(f"Model trained and saved to {self.model_path}")
 
     def predict_win_probability(self, signal):
-        """Predict win probability for a new signal."""
         if self.model is None:
             return 0.5
-        # Create feature vector (must match training)
         features = [[
             signal['confidence'],
             1 if 'LONG' in signal.get('direction','') else 0,
