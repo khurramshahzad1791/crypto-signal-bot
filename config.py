@@ -18,8 +18,6 @@ RISK_PER_TRADE = 0.02  # 2%
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Paths
+# Paths – ensure these directories exist
 DATA_PATH = "/app/data/"
-MODEL_PATH = "/app/models/"
-# Add at the bottom
-MODEL_PATH = "/app/data/models/"
+MODEL_PATH = "/app/data/models/"  # inside the volume
