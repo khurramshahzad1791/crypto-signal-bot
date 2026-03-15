@@ -20,4 +20,4 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Paths – ensure these directories exist
 DATA_PATH = "/app/data/"
-MODEL_PATH = "/app/data/models/"  # inside the volume
+MODEL_PATH = "/app/data/models/"
