@@ -4,6 +4,10 @@ streamlit==1.31.0
 pandas==2.2.1
 numpy==1.26.4
 plotly==5.20.0
+scikit-learn==1.4.0
+lightgbm==4.3.0
+joblib==1.3.2
+sqlalchemy==2.0.27
 ccxt>=4.2.0
 python-dotenv==1.0.0
 requests==2.31.0
