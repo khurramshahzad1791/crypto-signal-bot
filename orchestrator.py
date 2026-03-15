@@ -293,24 +293,19 @@ def main():
             st.session_state.chat = TradingChat()
             st.session_state.messages = []
 
-        # Display chat messages from history
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-        # React to user input
         if prompt := st.chat_input("You:"):
-            # Display user message
             st.chat_message("user").markdown(prompt)
             st.session_state.messages.append({"role": "user", "content": prompt})
 
-            # Get assistant response
             recent_signals = orch.signals[-5:] if orch.signals else []
             db_session = Session()
             recent_trades = db_session.query(Trade).order_by(Trade.timestamp.desc()).limit(5).all()
             response = st.session_state.chat.get_response(prompt, recent_signals, recent_trades)
 
-            # Display assistant response
             with st.chat_message("assistant"):
                 st.markdown(response)
             st.session_state.messages.append({"role": "assistant", "content": response})
@@ -320,15 +315,99 @@ def main():
         col1, col2 = st.columns([1, 3])
         with col1:
             chart_pair = st.selectbox("Select Pair", orch.agents['market_analyst'].pairs)
+            # Timeframe selection – now includes 15m and 30m
+            tf_map = {
+                "15m": 15,
+                "30m": 30,
+                "1h": 60,
+                "4h": 240,
+                "1d": 1440,
+                "1w": 10080
+            }
+            selected_tf = st.selectbox("Timeframe", list(tf_map.keys()), index=2)  # default to 1h
+            tf_minutes = tf_map[selected_tf]
             chart_days = st.slider("Days of history", 1, 30, 7)
+            # Chart type
+            chart_type = st.selectbox("Chart Type", ["Candlestick", "Line", "Heikin-Ashi"], index=0)
+            # Indicators
+            indicators = st.multiselect("Indicators", ["EMA20", "EMA50", "Bollinger Bands", "RSI"], default=["EMA20", "EMA50"])
             show_support = st.checkbox("Show Support/Resistance", True)
             show_trendlines = st.checkbox("Show Trendlines", True)
             if st.button("🔄 Refresh Chart"):
                 st.rerun()
         with col2:
             ma = orch.agents['market_analyst']
-            df = ma.fetch_ohlcv(chart_pair, '1h', 24*chart_days)
+            # Calculate number of candles needed – cap at 1000 to avoid excessive API calls
+            limit = min(chart_days * 24 * 60 // tf_minutes, 1000)
+            df = ma.fetch_ohlcv(chart_pair, selected_tf, limit=limit)
             if df is not None:
+                # Build figure with subplots if RSI or volume
+                has_rsi = "RSI" in indicators
+                has_volume = True  # always show volume
+                rows = 1 + (1 if has_volume else 0) + (1 if has_rsi else 0)
+                row_heights = [0.6] + ([0.2] if has_volume else []) + ([0.2] if has_rsi else [])
+                fig = make_subplots(
+                    rows=rows,
+                    cols=1,
+                    shared_xaxes=True,
+                    vertical_spacing=0.03,
+                    row_heights=row_heights
+                )
+
+                # Price chart
+                row_idx = 1
+                if chart_type == "Candlestick":
+                    fig.add_trace(go.Candlestick(
+                        x=df['timestamp'],
+                        open=df['open'],
+                        high=df['high'],
+                        low=df['low'],
+                        close=df['close'],
+                        name='Price',
+                        increasing_line_color='#26a69a',
+                        decreasing_line_color='#ef5350'
+                    ), row=row_idx, col=1)
+                elif chart_type == "Line":
+                    fig.add_trace(go.Scatter(
+                        x=df['timestamp'],
+                        y=df['close'],
+                        mode='lines',
+                        name='Close',
+                        line=dict(color='#2196f3')
+                    ), row=row_idx, col=1)
+                elif chart_type == "Heikin-Ashi":
+                    # Heikin-Ashi calculation
+                    ha_close = (df['open'] + df['high'] + df['low'] + df['close']) / 4
+                    ha_open = (df['open'].shift(1) + ha_close.shift(1)) / 2
+                    ha_open.iloc[0] = df['open'].iloc[0]  # first value
+                    ha_high = df[['high', ha_open.name, ha_close.name]].max(axis=1)
+                    ha_low = df[['low', ha_open.name, ha_close.name]].min(axis=1)
+                    fig.add_trace(go.Candlestick(
+                        x=df['timestamp'],
+                        open=ha_open,
+                        high=ha_high,
+                        low=ha_low,
+                        close=ha_close,
+                        name='Heikin-Ashi'
+                    ), row=row_idx, col=1)
+
+                # Indicators
+                if "EMA20" in indicators:
+                    ema20 = df['close'].ewm(span=20).mean()
+                    fig.add_trace(go.Scatter(x=df['timestamp'], y=ema20, name='EMA20', line=dict(color='orange')), row=row_idx, col=1)
+                if "EMA50" in indicators:
+                    ema50 = df['close'].ewm(span=50).mean()
+                    fig.add_trace(go.Scatter(x=df['timestamp'], y=ema50, name='EMA50', line=dict(color='blue')), row=row_idx, col=1)
+                if "Bollinger Bands" in indicators:
+                    bb_mid = df['close'].rolling(20).mean()
+                    bb_std = df['close'].rolling(20).std()
+                    bb_upper = bb_mid + 2 * bb_std
+                    bb_lower = bb_mid - 2 * bb_std
+                    fig.add_trace(go.Scatter(x=df['timestamp'], y=bb_upper, name='BB Upper', line=dict(color='gray', dash='dash')), row=row_idx, col=1)
+                    fig.add_trace(go.Scatter(x=df['timestamp'], y=bb_lower, name='BB Lower', line=dict(color='gray', dash='dash')), row=row_idx, col=1)
+                    fig.add_trace(go.Scatter(x=df['timestamp'], y=bb_mid, name='BB Mid', line=dict(color='gray')), row=row_idx, col=1)
+
+                # Support/Resistance detection (simplified pivots)
                 highs = df['high'].values
                 lows = df['low'].values
                 support_levels = []
@@ -339,35 +418,49 @@ def main():
                     if highs[i] > highs[i-1] and highs[i] > highs[i+1]:
                         resistance_levels.append((df['timestamp'].iloc[i], highs[i]))
 
-                fig = go.Figure(data=[go.Candlestick(
-                    x=df['timestamp'],
-                    open=df['open'],
-                    high=df['high'],
-                    low=df['low'],
-                    close=df['close'],
-                    name='Price'
-                )])
                 if show_support:
                     for ts, level in support_levels[-10:]:
-                        fig.add_hline(y=level, line_dash="dot", line_color="green", opacity=0.3)
+                        fig.add_hline(y=level, line_dash="dot", line_color="green", opacity=0.3, row=row_idx, col=1)
                 if show_trendlines:
                     if len(support_levels) >= 2:
                         x_vals = [support_levels[-2][0], support_levels[-1][0]]
                         y_vals = [support_levels[-2][1], support_levels[-1][1]]
-                        fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines', name='Uptrend', line=dict(color='lime', dash='dash')))
+                        fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines', name='Uptrend', line=dict(color='lime', dash='dash')), row=row_idx, col=1)
                     if len(resistance_levels) >= 2:
                         x_vals = [resistance_levels[-2][0], resistance_levels[-1][0]]
                         y_vals = [resistance_levels[-2][1], resistance_levels[-1][1]]
-                        fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines', name='Downtrend', line=dict(color='red', dash='dash')))
+                        fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines', name='Downtrend', line=dict(color='red', dash='dash')), row=row_idx, col=1)
 
-                df['ema20'] = df['close'].ewm(span=20).mean()
-                df['ema50'] = df['close'].ewm(span=50).mean()
-                fig.add_trace(go.Scatter(x=df['timestamp'], y=df['ema20'], name='EMA20', line=dict(color='orange')))
-                fig.add_trace(go.Scatter(x=df['timestamp'], y=df['ema50'], name='EMA50', line=dict(color='blue')))
+                # Volume
+                if has_volume:
+                    row_idx += 1
+                    colors = ['red' if c < o else 'green' for c, o in zip(df['close'], df['open'])]
+                    fig.add_trace(go.Bar(x=df['timestamp'], y=df['volume'], name='Volume', marker_color=colors), row=row_idx, col=1)
 
-                fig.update_layout(title=f"{chart_pair} – Last {chart_days} days", height=500)
-                st.plotly_chart(fig, use_container_width=True)
+                # RSI
+                if has_rsi:
+                    row_idx += 1
+                    delta = df['close'].diff()
+                    gain = delta.where(delta > 0, 0).rolling(14).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+                    rs = gain / loss
+                    rsi = 100 - (100 / (1 + rs))
+                    fig.add_trace(go.Scatter(x=df['timestamp'], y=rsi, name='RSI', line=dict(color='purple')), row=row_idx, col=1)
+                    fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=row_idx, col=1)
+                    fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=row_idx, col=1)
 
+                fig.update_layout(
+                    title=f"{chart_pair} – {selected_tf} (last {len(df)} candles)",
+                    height=600,
+                    margin=dict(l=20, r=20, t=40, b=20),
+                    hovermode="x unified",
+                    dragmode="zoom",
+                    template="plotly_dark"
+                )
+                fig.update_xaxes(rangeslider_visible=False)
+                st.plotly_chart(fig, use_container_width=False, width=1000)
+
+                # Chat about chart
                 st.subheader("Ask about this chart")
                 chart_query = st.text_input("Your question about the chart:")
                 if st.button("Ask Gemini about chart"):
@@ -377,7 +470,7 @@ def main():
                             context += f"Recent support near {support_levels[-1][1]:.2f}. "
                         if resistance_levels:
                             context += f"Recent resistance near {resistance_levels[-1][1]:.2f}. "
-                        prompt = f"Regarding the {chart_pair} chart, {context} User asks: {chart_query}"
+                        prompt = f"Regarding the {chart_pair} {selected_tf} chart, {context} User asks: {chart_query}"
                         response = st.session_state.chat.get_response(prompt, [], [])
                         st.text_area("Gemini:", response, height=150)
             else:
@@ -397,10 +490,9 @@ def main():
             st.chat_message("user").markdown(agent_query)
             st.session_state.agent_chat_history.append({"role": "user", "content": agent_query})
 
-            # Get news sentiment asynchronously (but we're in a sync context, so we'll handle)
+            # Get news sentiment (async hack)
             news_ctx = "Neutral"
             try:
-                # We need to run async in sync context – quick hack: create new loop
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 news_result = loop.run_until_complete(orch.agents['news_sentiment'].analyze())
