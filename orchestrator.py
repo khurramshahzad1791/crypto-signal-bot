@@ -47,7 +47,6 @@ class PaperTrade:
         self.strategy = signal.get('strategy', 'unknown')
         self.status = 'open'
         self.db_session = db_session
-        # Create database record
         trade = Trade(
             pair=self.pair,
             signal_type=f"{self.direction}_{self.strategy}",
@@ -62,13 +61,12 @@ class PaperTrade:
         self.db_id = trade.id
 
     def check_exit(self, current_price):
-        """Check if TP or SL hit, return outcome if closed"""
         if self.direction == 'LONG':
             if current_price >= self.take_profit:
                 return 'win', self.take_profit
             elif current_price <= self.stop_loss:
                 return 'loss', self.stop_loss
-        else:  # SHORT
+        else:
             if current_price <= self.take_profit:
                 return 'win', self.take_profit
             elif current_price >= self.stop_loss:
@@ -76,7 +74,6 @@ class PaperTrade:
         return None, None
 
     def close(self, outcome, exit_price):
-        """Close the trade and update database"""
         pnl_pct = ((exit_price - self.entry_price) / self.entry_price) * 100
         if self.direction == 'SHORT':
             pnl_pct = -pnl_pct
@@ -294,15 +291,29 @@ def main():
         st.subheader("AI Chat Assistant")
         if 'chat' not in st.session_state:
             st.session_state.chat = TradingChat()
+            st.session_state.messages = []
 
-        user_input = st.text_input("You:", key="chat_input")
-        if st.button("Send"):
-            if user_input:
-                recent_signals = orch.signals[-5:] if orch.signals else []
-                db_session = Session()
-                recent_trades = db_session.query(Trade).order_by(Trade.timestamp.desc()).limit(5).all()
-                response = st.session_state.chat.get_response(user_input, recent_signals, recent_trades)
-                st.text_area("Assistant:", response, height=200)
+        # Display chat messages from history
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        # React to user input
+        if prompt := st.chat_input("You:"):
+            # Display user message
+            st.chat_message("user").markdown(prompt)
+            st.session_state.messages.append({"role": "user", "content": prompt})
+
+            # Get assistant response
+            recent_signals = orch.signals[-5:] if orch.signals else []
+            db_session = Session()
+            recent_trades = db_session.query(Trade).order_by(Trade.timestamp.desc()).limit(5).all()
+            response = st.session_state.chat.get_response(prompt, recent_signals, recent_trades)
+
+            # Display assistant response
+            with st.chat_message("assistant"):
+                st.markdown(response)
+            st.session_state.messages.append({"role": "assistant", "content": response})
 
     with tab5:
         st.subheader("Interactive Chart Analysis")
@@ -374,22 +385,42 @@ def main():
 
     with tab6:
         st.subheader("Agent Team Chat")
-        st.write("Chat with all your agents collectively.")
-        user_query = st.text_input("Ask the agent team:", key="agent_chat_input")
-        if st.button("Ask Agents"):
-            if user_query:
-                market_ctx = "Market Analyst: " + (str(orch.signals[-3:]) if orch.signals else "No recent signals")
-                news_ctx = "News Sentiment: " + (str(orch.agents['news_sentiment'].analyze()) if hasattr(orch.agents['news_sentiment'], 'analyze') else "Neutral")
-                prompt = f"""You are a team of trading agents: market analyst, news analyst, technical strategist, risk manager, and execution optimizer.
-A user asks: {user_query}
+        if 'agent_chat_history' not in st.session_state:
+            st.session_state.agent_chat_history = []
+
+        for msg in st.session_state.agent_chat_history:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        agent_query = st.chat_input("Ask the agent team:")
+        if agent_query:
+            st.chat_message("user").markdown(agent_query)
+            st.session_state.agent_chat_history.append({"role": "user", "content": agent_query})
+
+            # Get news sentiment asynchronously (but we're in a sync context, so we'll handle)
+            news_ctx = "Neutral"
+            try:
+                # We need to run async in sync context – quick hack: create new loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                news_result = loop.run_until_complete(orch.agents['news_sentiment'].analyze())
+                news_ctx = news_result.get('summary', 'Neutral')
+            except:
+                pass
+
+            market_ctx = "Market Analyst: " + (str(orch.signals[-3:]) if orch.signals else "No recent signals")
+            prompt = f"""You are a team of trading agents: market analyst, news analyst, technical strategist, risk manager, and execution optimizer.
+A user asks: {agent_query}
 Provide a collaborative answer incorporating insights from each agent. Be concise and helpful.
-Current context: {market_ctx} | {news_ctx}
+Current context: {market_ctx} | News Sentiment: {news_ctx}
 """
-                if 'chat' in st.session_state:
-                    response = st.session_state.chat.get_response(prompt, [], [])
-                    st.text_area("Agent Team:", response, height=300)
-                else:
-                    st.error("Chat not initialized.")
+            if 'chat' in st.session_state:
+                response = st.session_state.chat.get_response(prompt, [], [])
+                with st.chat_message("assistant"):
+                    st.markdown(response)
+                st.session_state.agent_chat_history.append({"role": "assistant", "content": response})
+            else:
+                st.error("Chat not initialized.")
 
 if __name__ == "__main__":
     main()
