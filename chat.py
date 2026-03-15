@@ -10,40 +10,34 @@ class TradingChat:
         self.model = None
         if self.api_key:
             genai.configure(api_key=self.api_key)
-            # Correct model name for free tier (as of 2025)
-            model_name = 'models/gemini-1.5-flash'
+            # Use a model that definitely exists (from your logs)
+            model_name = 'models/gemini-2.5-flash'
             try:
                 self.model = genai.GenerativeModel(model_name)
-                # Quick test to confirm it works
-                response = self.model.generate_content("test")
-                if response and response.text:
-                    logger.info(f"Chat using model: {model_name} – success")
-                else:
-                    logger.error("Model test returned empty response")
-                    self.model = None
+                # Quick test
+                self.model.generate_content("test")
+                logger.info(f"Chat using model: {model_name}")
             except Exception as e:
-                logger.error(f"Model initialization failed: {e}")
-                # Optionally list available models for debugging
+                logger.error(f"Model {model_name} failed: {e}")
+                # Fallback to another model
+                fallback = 'models/gemini-flash-latest'
                 try:
-                    models = genai.list_models()
-                    logger.info("Available models that support generateContent:")
-                    for m in models:
-                        if 'generateContent' in m.supported_generation_methods:
-                            logger.info(f" - {m.name}")
-                except Exception as list_err:
-                    logger.error(f"Could not list models: {list_err}")
-                self.model = None
+                    self.model = genai.GenerativeModel(fallback)
+                    self.model.generate_content("test")
+                    logger.info(f"Chat using fallback model: {fallback}")
+                except Exception as e2:
+                    logger.error(f"Fallback model also failed: {e2}")
+                    self.model = None
         else:
             logger.error("GEMINI_API_KEY not set.")
 
     def get_response(self, user_message, recent_signals, recent_trades):
         if not self.model:
-            return "Chat is disabled. Check your Gemini API key and model availability in Google AI Studio."
-        # Build context
+            return "Chat is temporarily unavailable. Please check logs or try again later."
         signals_text = ""
         if recent_signals:
             signals_text = "Recent signals:\n" + "\n".join(
-                [f"- {s['pair']} {s['direction']} at {s['price']:.2f} (confidence {s['confidence']}%) – {s.get('reasons','')}"
+                [f"- {s['pair']} {s['direction']} at {s['price']:.2f} (confidence {s['confidence']}%)"
                  for s in recent_signals]
             )
         else:
